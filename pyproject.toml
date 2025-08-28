@@ -7,24 +7,24 @@ readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "ItzSkyReed"}]
 keywords = ["sqlalchemy", "pydantic", "mapper", "async"]
-
-
 classifiers = [
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Development Status :: 4 - Beta",
 ]
-[project.urls]
-Homepage = "https://github.com/ItzSkyReed/sqlalchemy-pydantic-mapper"
-
 
 dependencies = [
     "sqlalchemy>=2.0",
     "pydantic>=2.0",
 ]
 
+
+[project.urls]
+Homepage = "https://github.com/ItzSkyReed/sqlalchemy-pydantic-mapper"
+
 [project.optional-dependencies]
+
 dev = [
     "ruff",
     "pytest",
