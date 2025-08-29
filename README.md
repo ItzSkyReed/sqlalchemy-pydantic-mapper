@@ -88,6 +88,95 @@ def stud_to_studschema(db: StudentDB) -> StudSchema:
 ObjectMapper.register(StudentDB, StudSchema, func=stud_to_studschema)
 ```
 
+Вот дополнение к твоему README с новыми примерами — только новые блоки, как ты просил:
+
+---
+
+
+7. Mapping multiple objects with `map_many`
+
+```python
+users = [UserDB(id=1, name="Alice"), UserDB(id=2, name="Bob")]
+
+# Synchronous mapper
+def mapper(db: UserDB) -> UserSchema:
+    return UserSchema(id=db.id, name=db.name)
+
+ObjectMapper.register(UserDB, UserSchema, func=mapper)
+
+import asyncio
+
+async def main():
+    results = await ObjectMapper.map_many(users, UserSchema)
+    print(results)
+    # [UserSchema(id=1, name='Alice'), UserSchema(id=2, name='Bob')]
+
+asyncio.run(main())
+```
+
+---
+
+8. Passing additional arguments to a mapper function
+
+```python
+def mapper_with_prefix(db: UserDB, prefix: str) -> UserSchema:
+    return UserSchema(id=db.id, name=f"{prefix}{db.name}")
+
+# Register mapper with a closure to pass extra arguments
+ObjectMapper.register(UserDB, UserSchema, func=lambda db: mapper_with_prefix(db, prefix="Mr. "))
+
+user = UserDB(id=1, name="Alice")
+import asyncio
+
+async def main():
+    result = await ObjectMapper.map(user, UserSchema)
+    print(result)  # UserSchema(id=1, name='Mr. Alice')
+
+asyncio.run(main())
+```
+
+---
+
+9. Re-registering a mapper (overwriting)
+
+```python
+# Original mapper
+ObjectMapper.register(UserDB, UserSchema, func=lambda db: UserSchema(id=db.id, name=db.name))
+
+# Re-register with a new logic
+ObjectMapper.register(UserDB, UserSchema, func=lambda db: UserSchema(id=db.id, name=db.name.upper()), override_existing=True)
+
+user = UserDB(id=2, name="Bob")
+
+import asyncio
+async def main():
+    result = await ObjectMapper.map(user, UserSchema)
+    print(result)  # UserSchema(id=2, name='BOB')
+
+asyncio.run(main())
+```
+
+---
+
+11. Async mapper with `map_many`
+
+```python
+async def async_mapper(db: UserDB) -> UserSchema:
+    import asyncio
+    await asyncio.sleep(0.01)
+    return UserSchema(id=db.id, name=db.name.upper())
+
+ObjectMapper.register(UserDB, UserSchema, func=async_mapper)
+
+users = [UserDB(id=1, name="Alice"), UserDB(id=2, name="Bob")]
+
+async def main():
+    results = await ObjectMapper.map_many(users, UserSchema)
+    print(results)
+    # [UserSchema(id=1, name='ALICE'), UserSchema(id=2, name='BOB')]
+
+asyncio.run(main())
+```
 ---
 
 ## Errors and Behavior on Incorrect Usage
