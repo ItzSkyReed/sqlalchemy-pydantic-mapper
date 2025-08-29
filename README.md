@@ -87,9 +87,6 @@ def stud_to_studschema(db: StudentDB) -> StudSchema:
 
 ObjectMapper.register(StudentDB, StudSchema, func=stud_to_studschema)
 ```
-
-Вот дополнение к твоему README с новыми примерами — только новые блоки, как ты просил:
-
 ---
 
 
