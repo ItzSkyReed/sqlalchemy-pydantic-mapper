@@ -141,7 +141,7 @@ asyncio.run(main())
 ObjectMapper.register(UserDB, UserSchema, func=lambda db: UserSchema(id=db.id, name=db.name))
 
 # Re-register with a new logic
-ObjectMapper.register(UserDB, UserSchema, func=lambda db: UserSchema(id=db.id, name=db.name.upper()), 
+ObjectMapper.register(UserDB, UserSchema, func=lambda db: UserSchema(id=db.id, name=db.name.upper()),
                       override_existing=True)
 
 user = UserDB(id=2, name="Bob")
