@@ -1,4 +1,4 @@
-# sqlalchemy-pydantic-mapper
+#sqlalchemy-pydantic-mapper
 
 `sqlalchemy-pydantic-mapper` simplifies converting SQLAlchemy instances (subclasses of `sqlalchemy.orm.DeclarativeBase`) into Pydantic models (`pydantic.BaseModel`).
 
@@ -7,7 +7,10 @@
 * registering custom synchronous and asynchronous mappers;
 * registration via decorator or by passing `func=` directly;
 * automatic mapping via Pydantic if the model has `model_config = ConfigDict(from_attributes=True)`;
-* `map(...)` — an async method returning the target Pydantic model instance (must `await` it).
+* `map(...)` — an async method returning the target Pydantic model instance (must `await` it);
+* `map_each(...)` — an async method returning the sequence of target Pydantic model instances, calls target func for every ORM model (must `await` it);
+* `map_bulk(...)` — an async method returning a list of mapped Pydantic model instances from a sequence of SQLAlchemy objects(must `await` it).
+
 ---
 ## Usage Examples (Full Code Snippets)
 
@@ -16,11 +19,13 @@
 ```python
 from sqlalchemy_pydantic_mapper import ObjectMapper
 
+
 def mapper(db: UserDB) -> UserSchema:
     return UserSchema(id=db.id, name=db.name)
 
+
 ObjectMapper.register(UserDB, UserSchema, func=mapper)
-assert ObjectMapper._mappers[UserDB][UserSchema] is mapper
+assert ObjectMapper._mappers_single[UserDB][UserSchema] is mapper
 ```
 
 2. Registration via decorator:
@@ -95,18 +100,22 @@ ObjectMapper.register(StudentDB, StudSchema, func=stud_to_studschema)
 ```python
 users = [UserDB(id=1, name="Alice"), UserDB(id=2, name="Bob")]
 
+
 # Synchronous mapper
 def mapper(db: UserDB) -> UserSchema:
     return UserSchema(id=db.id, name=db.name)
+
 
 ObjectMapper.register(UserDB, UserSchema, func=mapper)
 
 import asyncio
 
+
 async def main():
-    results = await ObjectMapper.map_many(users, UserSchema)
+    results = await ObjectMapper.map_each(users, UserSchema)
     print(results)
     # [UserSchema(id=1, name='Alice'), UserSchema(id=2, name='Bob')]
+
 
 asyncio.run(main())
 ```
@@ -157,7 +166,7 @@ asyncio.run(main())
 
 ---
 
-10. Async mapper with `map_many`
+10. Async mapper with `map_each`
 
 ```python
 async def async_mapper(db: UserDB) -> UserSchema:
@@ -165,14 +174,40 @@ async def async_mapper(db: UserDB) -> UserSchema:
     await asyncio.sleep(0.01)
     return UserSchema(id=db.id, name=db.name.upper())
 
+
 ObjectMapper.register(UserDB, UserSchema, func=async_mapper)
 
 users = [UserDB(id=1, name="Alice"), UserDB(id=2, name="Bob")]
 
+
 async def main():
-    results = await ObjectMapper.map_many(users, UserSchema)
+    results = await ObjectMapper.map_each(users, UserSchema)
     print(results)
     # [UserSchema(id=1, name='ALICE'), UserSchema(id=2, name='BOB')]
+
+
+asyncio.run(main())
+```
+
+11. Async mapper with `map_bulk` - True bulk operation under all the sequence at once
+
+```python
+async def async_mapper(dbs: Sequence[UserDB]) -> Sequence[UserSchema]:
+    import asyncio
+    await asyncio.sleep(0.01)
+    return [UserSchema(id=db.id, name=db.name.upper()) for db in dbs]
+
+
+ObjectMapper.register_bulk(UserDB, UserSchema, func=async_mapper)
+
+users = [UserDB(id=1, name="Alice"), UserDB(id=2, name="Bob")]
+
+
+async def main():
+    results = await ObjectMapper.map_bulk(users, UserSchema)
+    print(results)
+    # [UserSchema(id=1, name='ALICE'), UserSchema(id=2, name='BOB')]
+
 
 asyncio.run(main())
 ```
