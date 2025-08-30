@@ -1,6 +1,6 @@
 [project]
 name = "sqlalchemy_pydantic_mapper"
-version = "0.2.0"
+version = "0.3.0"
 requires-python = ">=3.13"
 description = "sqlalchemy-pydantic-mapper library for mapping SQLAlchemy models to Pydantic"
 readme = "README.md"
