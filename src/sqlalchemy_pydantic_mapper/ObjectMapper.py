@@ -5,9 +5,10 @@ from typing import (
     Callable,
     Concatenate,
     Coroutine,
+    Literal,
     ParamSpec,
     Sequence,
-    TypeVar, Literal,
+    TypeVar,
 )
 
 from pydantic import BaseModel
@@ -26,20 +27,23 @@ class NoFuncType:
 
 _NoFunc = NoFuncType()
 
+
 class ObjectMapper:
     def __new__(cls, *args, **kwargs):
         raise TypeError(f"It is not possible to create {cls.__name__} instance")
 
-    # {from_class: {to_class: funс}}
-    _mappers_single: dict[type, dict[type, Callable | NoFuncType]] = {}
-    _mappers_bulk: dict[type, dict[type, Callable | NoFuncType]] = {}
+    # {from_class: {to_class: [func, is_async]}}
+    _mappers_single: dict[type, dict[type, tuple[Callable | NoFuncType, bool]]] = {}
+    _mappers_bulk: dict[type, dict[type, tuple[Callable | NoFuncType, bool]]] = {}
 
     __scopes = {"single", "bulk"}
 
     @staticmethod
     def _validate_from_cls(cls: type[F]):
         if not issubclass(cls, DeclarativeBase):
-            raise TypeError("from_ must be a class inheriting from sqlalchemy.orm.DeclarativeBase")
+            raise TypeError(
+                "from_ must be a class inheriting from sqlalchemy.orm.DeclarativeBase"
+            )
 
     @staticmethod
     def _validate_to_cls(cls: type[T]):
@@ -47,11 +51,13 @@ class ObjectMapper:
             raise TypeError("to_ must be a class inheriting from pydantic.BaseModel")
 
     @classmethod
-    def _validate_already_registered(cls, from_: type[F], to: type[T], *, is_bulk: bool):
+    def _validate_already_registered(
+        cls, from_: type[F], to: type[T], *, is_bulk: bool
+    ):
         mapper = cls._mappers_bulk if is_bulk else cls._mappers_single
         if from_ in mapper and to in mapper[from_]:
             raise KeyError(
-                f"A {"bulk" if is_bulk else ""} mapping from {from_.__name__} to {to.__name__} is already registered."
+                f"A {'bulk' if is_bulk else ''} mapping from {from_.__name__} to {to.__name__} is already registered."
             )
 
     @staticmethod
@@ -66,12 +72,12 @@ class ObjectMapper:
 
     @classmethod
     def register(
-            cls,
-            from_: type[F],
-            to: type[T],
-            *,
-            func: Callable[[Concatenate[F, P]], T | Coroutine[Any, Any, T]] | None = None,
-            override_existing: bool = False,
+        cls,
+        from_: type[F],
+        to: type[T],
+        *,
+        func: Callable[[Concatenate[F, P]], T | Coroutine[Any, Any, T]] | None = None,
+        override_existing: bool = False,
     ):
         """
         Registers a mapping function between a SQLAlchemy ORM class and a Pydantic model class.
@@ -106,25 +112,38 @@ class ObjectMapper:
             cls._validate_already_registered(from_, to, is_bulk=False)
 
         def decorator(f: Callable[[Concatenate[F, P]], T | Coroutine[Any, Any, T]]):
-            cls._mappers_single.setdefault(from_, {})[to] = f
+            cls._mappers_single.setdefault(from_, {})[to] = (
+                f,
+                inspect.iscoroutinefunction(f),
+            )
             return f
 
         if func is not None:
-            cls._mappers_single.setdefault(from_, {})[to] = func
+            cls._mappers_single.setdefault(from_, {})[to] = (
+                func,
+                inspect.iscoroutinefunction(func),
+            )
             return func
         else:
             cls._validate_pydantic_from_attributes(to)
-            cls._mappers_single.setdefault(from_, {})[to] = _NoFunc
+            cls._mappers_single.setdefault(from_, {})[to] = (
+                _NoFunc,
+                False,
+            )
         return decorator
 
     @classmethod
     def register_bulk(
-            cls,
-            from_: type[F],
-            to: type[T],
-            *,
-            func: Callable[[Concatenate[Sequence[F], P]], Sequence[T] | Coroutine[Any, Any, Sequence[T]]] | None = None,
-            override_existing: bool = False,
+        cls,
+        from_: type[F],
+        to: type[T],
+        *,
+        func: Callable[
+            [Concatenate[Sequence[F], P]],
+            Sequence[T] | Coroutine[Any, Any, Sequence[T]],
+        ]
+        | None = None,
+        override_existing: bool = False,
     ):
         """
         Registers a mapping function between a Sequence of SQLAlchemy ORM classes and a Sequence of Pydantic model classes.
@@ -158,20 +177,52 @@ class ObjectMapper:
         if not override_existing:
             cls._validate_already_registered(from_, to, is_bulk=True)
 
-        def decorator(f: Callable[[Concatenate[Sequence[F], P]], T | Coroutine[Any, Any, Sequence[T]]]):
-            cls._mappers_bulk.setdefault(from_, {})[to] = f
+        def decorator(
+            f: Callable[
+                [Concatenate[Sequence[F], P]], T | Coroutine[Any, Any, Sequence[T]]
+            ],
+        ):
+            cls._mappers_bulk.setdefault(from_, {})[to] = (
+                f,
+                inspect.iscoroutinefunction(f),
+            )
             return f
 
         if func is not None:
-            cls._mappers_bulk.setdefault(from_, {})[to] = func
+            cls._mappers_bulk.setdefault(from_, {})[to] = (
+                func,
+                inspect.iscoroutinefunction(func),
+            )
             return func
         else:
             cls._validate_pydantic_from_attributes(to)
-            cls._mappers_bulk.setdefault(from_, {})[to] = _NoFunc
+            cls._mappers_bulk.setdefault(from_, {})[to] = (
+                _NoFunc,
+                False,
+            )
         return decorator
 
+    @staticmethod
+    def _remove(
+        mapping: dict[type, dict[type, tuple[Callable | NoFuncType, bool]]],
+        from_: type[F],
+        to: type[T],
+    ) -> bool:
+        if from_ in mapping and to in mapping[from_]:
+            mapping[from_].pop(to)
+            if not mapping[from_]:
+                mapping.pop(from_)
+            return True
+        return False
+
     @classmethod
-    def unregister(cls, from_: type[F], to: type[T], *, scope: Literal['single', 'bulk'] | None = None) -> None:
+    def unregister(
+        cls,
+        from_: type[F],
+        to: type[T],
+        *,
+        scope: Literal["single", "bulk"] | None = None,
+    ) -> None:
         """
         Removes a registered mapping between a SQLAlchemy ORM class and a Pydantic model class.
 
@@ -180,35 +231,42 @@ class ObjectMapper:
         :param scope: Optional; one of {"single", "many"} to remove from a specific registry. If None, tries to remove from both.
         :raises KeyError: If mapping not found in the specified (or both) scopes.
         """
-        def _remove(mapping: dict[type, dict[type, Callable]]):
-            if from_ in mapping and to in mapping[from_]:
-                mapping[from_].pop(to)
-                if not mapping[from_]:
-                    mapping.pop(from_)
-                return True
-            return False
 
         if scope is not None:
             if scope not in cls.__scopes:
-                raise ValueError("scope must be one of {\"single\", \"bulk\"}")
+                raise ValueError('scope must be one of {"single", "bulk"}')
 
             if scope == "single":
-                if not _remove(cls._mappers_single):
-                    raise KeyError(f"No single-object mapping {from_.__name__} -> {to.__name__}")
+                if not cls._remove(cls._mappers_single, from_, to):
+                    raise KeyError(
+                        f"No single-object mapping {from_.__name__} -> {to.__name__}"
+                    )
             else:
-                if not _remove(cls._mappers_bulk):
-                    raise KeyError(f"No sequence mapping {from_.__name__} -> {to.__name__}")
+                if not cls._remove(cls._mappers_bulk, from_, to):
+                    raise KeyError(
+                        f"No sequence mapping {from_.__name__} -> {to.__name__}"
+                    )
             return
 
-        removed = _remove(cls._mappers_single) or _remove(cls._mappers_bulk)
+        removed = cls._remove(cls._mappers_single, from_, to) or cls._remove(
+            cls._mappers_bulk, from_, to
+        )
         if not removed:
-            raise KeyError(f"No mapping {from_.__name__} -> {to.__name__} found in any scope")
+            raise KeyError(
+                f"No mapping {from_.__name__} -> {to.__name__} found in any scope"
+            )
 
     @classmethod
-    def is_registered(cls, from_: type[F], to: type[T],*, scope: Literal["single", "bulk"]) -> bool:
+    def is_registered(
+        cls, from_: type[F], to: type[T], *, scope: Literal["single", "bulk"]
+    ) -> bool:
         if scope not in cls.__scopes:
-            raise ValueError("scope must be one of {\"single\", \"bulk\"}")
-        mapper = cls._mappers_bulk if scope == "bulk" else cls._mappers_single
+            raise ValueError('scope must be one of {"single", "bulk"}')
+
+        mapper: dict[type, dict[type, tuple[Callable | NoFuncType, bool]]] = (
+            cls._mappers_bulk if scope == "bulk" else cls._mappers_single
+        )
+
         return from_ in mapper and to in mapper[from_]
 
     @classmethod
@@ -232,18 +290,22 @@ class ObjectMapper:
         cls._mappers_bulk.clear()
 
     @classmethod
-    def list_mappers(cls, *, scope: Literal["single", "bulk"]) -> list[tuple[type, type]]:
+    def list_mappers(
+        cls, *, scope: Literal["single", "bulk"]
+    ) -> list[tuple[type, type]]:
         """
         Returns a list of all registered mapping pairs.
 
-        :param scope: Optional; one of {"single", "bulk"}. If None, returns mappings from both scopes.
+        :param scope: One of {"single", "bulk"}.
         :return: List of tuples (from_class, to_class).
         """
         if scope not in cls.__scopes:
             raise ValueError('scope must be one of {"single", "bulk"}')
 
+        mapping: dict[type, dict[type, tuple[Callable | NoFuncType, bool]]]
         mapping = cls._mappers_single if scope == "single" else cls._mappers_bulk
-        return [(f, t) for f, sub in mapping.items() for t in sub]
+
+        return [(f, t) for f, sub in mapping.items() for t in sub.keys()]
 
     @classmethod
     async def map(cls, from_: F, to: type[T], **func_kwargs: Any) -> T:
@@ -270,7 +332,10 @@ class ObjectMapper:
           must not contain lazy-loaded attributes to avoid unexpected database
           queries or `DetachedInstanceError`.
         """
-        func = cls._mappers_single.get(type(from_), {}).get(to)
+        func, is_async = cls._mappers_single.get(type(from_), {}).get(to) or (
+            None,
+            False,
+        )
 
         if func is _NoFunc:
             # fallback if func is intentionally not set
@@ -283,13 +348,13 @@ class ObjectMapper:
 
         result = func(from_, **func_kwargs)
 
-        if inspect.isawaitable(result):
+        if is_async:
             return await result
         return result
 
     @classmethod
     async def map_each(
-            cls, from_items: Sequence[F], to: type[T], **func_kwargs: Any
+        cls, from_items: Sequence[F], to: type[T], **func_kwargs: Any
     ) -> Sequence[T]:
         """
         Asynchronously maps a sequence of SQLAlchemy ORM objects to Pydantic model instances,
@@ -322,7 +387,10 @@ class ObjectMapper:
         if not from_items:
             return []
 
-        func = cls._mappers_single.get(type(from_items[0]), {}).get(to)
+        func, is_async = cls._mappers_single.get(type(from_items[0]), {}).get(to) or (
+            None,
+            False,
+        )
 
         if func is _NoFunc:
             # fallback if func is intentionally not set
@@ -335,20 +403,16 @@ class ObjectMapper:
                 f"No bulk mapping registered for {type(from_items[0]).__name__} -> {to.__name__}"
             )
 
-        first_res = func(from_items[0], **func_kwargs)
-
-        if inspect.isawaitable(first_res):
-            coros = [first_res]
-            coros.extend([func(item, **func_kwargs) for item in from_items[1:]])
-            return await asyncio.gather(*coros)
+        if is_async:
+            return await asyncio.gather(
+                *(func(item, **func_kwargs) for item in from_items)
+            )
         else:
-            res = [first_res]
-            res.extend([func(item, **func_kwargs) for item in from_items[1:]])
-            return res
-
+            return [func(item, **func_kwargs) for item in from_items]
 
     @classmethod
-    async def map_bulk(cls, from_items: Sequence[F], to: type[T], **func_kwargs: Any
+    async def map_bulk(
+        cls, from_items: Sequence[F], to: type[T], **func_kwargs: Any
     ) -> Sequence[T]:
         """
         Asynchronously maps a sequence of SQLAlchemy ORM objects to Pydantic model instances
@@ -378,7 +442,10 @@ class ObjectMapper:
         if not from_items:
             return []
 
-        func = cls._mappers_bulk.get(type(from_items[0]), {}).get(to)
+        func, is_async = cls._mappers_bulk.get(type(from_items[0]), {}).get(to) or (
+            None,
+            False,
+        )
 
         if func is _NoFunc:
             # fallback if func is intentionally not set
@@ -393,7 +460,6 @@ class ObjectMapper:
 
         res = func(from_items, **func_kwargs)
 
-        if inspect.isawaitable(res):
+        if is_async:
             return await res
-
         return res
