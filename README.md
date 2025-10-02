@@ -1,4 +1,4 @@
-#sqlalchemy-pydantic-mapper
+# sqlalchemy-pydantic-mapper
 
 `sqlalchemy-pydantic-mapper` simplifies converting SQLAlchemy instances (subclasses of `sqlalchemy.orm.DeclarativeBase`) into Pydantic models (`pydantic.BaseModel`).
 
