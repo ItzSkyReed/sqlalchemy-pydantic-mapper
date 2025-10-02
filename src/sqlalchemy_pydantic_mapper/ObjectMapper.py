@@ -17,8 +17,12 @@ F = TypeVar("F", bound=DeclarativeBase)
 T = TypeVar("T", bound=BaseModel)
 P = ParamSpec("P")
 
+
 class NoFuncType:
     """Marker that the mapping is registered intentionally without a function."""
+
+    __slots__ = ()  # Yes we avoid 300 excessive allocated bytes lol
+
 
 _NoFunc = NoFuncType()
 
